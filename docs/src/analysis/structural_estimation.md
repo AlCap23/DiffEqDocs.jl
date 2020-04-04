@@ -317,4 +317,54 @@ plot!(approx_sol)
 
 ### Noninear Approximation of Dynamics with EDMD
 
-Not all systems can be approximated sufficiently via linear dynamics. To circum
+Not all systems can be approximated sufficiently via linear dynamics. However, we can map our states to a different space of nonlinear observations in which the dynamics can be linear. Let us start with a nonlinear discrete system
+
+```julia
+# Create a test system
+function test_discrete(du, u, p, t)
+    du[1] = 0.9u[1] + 0.1u[2]^2
+    du[2] = sin(u[1]) - 0.1u[1]
+end
+
+# Set up the problem
+u0 = [1.0; 2.0]
+tspan = (0.0, 50.0)
+prob = DiscreteProblem(test_discrete, u0, tspan)
+sol = solve(prob, FunctionMap())
+```
+
+To create an approximation in a nonlinear function space, we create a basis object.
+
+```julia
+# Create a basis of functions aka observables
+@variables u[1:2]
+h = [u[1]; sin(u[1]); sin(u[2]); u[2]; u[1]*u[2]; u[2]^2]
+basis = Basis(h, u)
+```
+
+To derive the approximation, we simply pass the data along with the basis into the `ExtendedDMD` algorithm, which spits out a `ExtendedDMD` which behaves like the `Koopman` struct from before.
+
+```julia
+# Build the edmd with subset of measurements
+approximator = ExtendedDMD(sol[:,:], basis)
+
+# Get the nonlinear dynamics in discrete time
+dudt_ = dynamics(approximator)
+```
+Now lets have a look at the approximation of the algorithm.
+
+```julia
+# Solve the estimation problem
+prob_ = DiscreteProblem(dudt_, u0, tspan, [])
+sol_ = solve(prob_, FunctionMap())
+```
+
+Looks good! But wait, we might have used to many basis objects (since right now, we know our system). We can try to reduce the approximation by using the `reduce_basis(approximation, threshold = 1e-5)` function. The sum of each row of the associated matrix will be checked against the threshold and simply thrown away, if it does not contribute to the overall dynamics.
+
+```julia
+# Reduce the basis
+reduced_basis = reduce_basis(approximator, threshold = 1e-5)
+println(reduced_basis)
+```
+The outcome matches the elementary functions of the original problem! Now we can
+just re-run the `ExtendedDMD` with the new basis.
